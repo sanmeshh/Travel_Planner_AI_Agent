@@ -19,4 +19,5 @@ def router(state):
 graph.add_conditional_edges("collect", router)
 graph.add_edge("resolve", END)
 
+
 app = graph.compile()

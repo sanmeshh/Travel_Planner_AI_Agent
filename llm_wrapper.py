@@ -7,7 +7,7 @@ load_dotenv()
 class LLM:
     def __init__(self, model='llama-3.3-70b-versatile'):
         self.model = model
-        api_key = os.getenv('key')
+        api_key = os.getenv('GROQ_KEY')
         
         self.client = Groq(api_key=api_key)
     def invoke(self, prompt: str) -> str:

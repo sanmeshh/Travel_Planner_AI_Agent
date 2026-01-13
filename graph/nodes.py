@@ -1,6 +1,10 @@
 from agents.preference_collector import collect_preferences
 from llm_wrapper import llm
 from agents.conflict_resolver import resolve_group
+from agents.itinerary_agent import generate_itinerary
+from agents.explanation_agent import explain_decision
+
+
 
 def collect_node(state):
     user = state.current_user
@@ -27,6 +31,15 @@ def resolve_node(state):
     prefs = list(state.preferences.values())
     state.resolved = resolve_group(prefs)
     return state
+
+
+
+def finalize_node(state):
+    gp = state.resolved
+    state.itinerary = generate_itinerary(gp)
+    state.explanation = explain_decision(gp)
+    return state
+
 
 
 

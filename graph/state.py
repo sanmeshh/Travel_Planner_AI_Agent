@@ -12,4 +12,8 @@ class TripState(BaseModel):
     current_user: Optional[str] = None
     current_message: Optional[str] = None
     resolved: Optional[ResolvedGroupPreference] = None
+    itinerary: dict | None = None
+    explanation: str | None = None
+    
+
 
