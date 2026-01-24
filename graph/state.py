@@ -1,19 +1,10 @@
-from typing import Dict, List, Optional,Set
-from pydantic import BaseModel
-from schemas.preferences import UserPreference
-from schemas.group_preferences import ResolvedGroupPreference
-
-
+from pydantic import BaseModel, Field
+from typing import Dict, List, Optional, Any
 
 class TripState(BaseModel):
-    users: list[str]
-    preferences: Dict[str, UserPreference] = {}
-    ready_users: Set[str] = set()
-    current_user: Optional[str] = None
-    current_message: Optional[str] = None
-    resolved: Optional[ResolvedGroupPreference] = None
-    itinerary: dict | None = None
-    explanation: str | None = None
-    
+    users: List[str] = Field(default_factory=list)
+    preferences: Dict[str, dict] = Field(default_factory=dict)
+    ready_users: List[str] = Field(default_factory=list)
 
-
+    expected_users: int | None = None   # 👈 NEW
+    resolved: Optional[dict] = None

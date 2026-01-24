@@ -1,88 +1,135 @@
-from typing import List
-from schemas.preferences import UserPreference, BudgetRange, ActivityPreference
-from schemas.group_preferences import ResolvedGroupPreference
+from typing import List, Dict, Tuple
 from collections import Counter
+import math
+
+from schemas.preferences import (
+    UserPreference,
+    BudgetRange,
+    ActivityPreference,
+)
+from schemas.group_preferences import ResolvedGroupPreference
 
 
-#solving the budget,activity and including voting conflict
-
-def resolve_budget(preferences:List[UserPreference]):
-    mins=[]
-    maxs=[]
+# -----------------------------
+# Budget Resolution (Intersection)
+# -----------------------------
+def resolve_budget(preferences: List[UserPreference]) -> BudgetRange:
+    mins, maxs = [], []
 
     for p in preferences:
-        if p.budget:#if the user has given budget
-            if p.budget.min_budget:
+        if p.budget:
+            if p.budget.min_budget is not None:
                 mins.append(p.budget.min_budget)
-            if p.budget.max_budget:
+            if p.budget.max_budget is not None:
                 maxs.append(p.budget.max_budget)
 
-        
-        final_min=max(mins) if mins else None
-        final_max=min(maxs) if maxs else None
+    if not mins or not maxs:
+        return BudgetRange(min_budget=None, max_budget=None)
 
-    return BudgetRange(min_budget=final_min,max_budget=final_max)
+    final_min = max(mins)
+    final_max = min(maxs)
+
+    # No overlap → unresolved conflict
+    if final_min > final_max:
+        return BudgetRange(min_budget=None, max_budget=None)
+
+    return BudgetRange(min_budget=final_min, max_budget=final_max)
 
 
-def resolve_location(preferences):
+# -----------------------------
+# Location Resolution (Voting + deterministic tie-break)
+# -----------------------------
+def resolve_location(preferences: List[UserPreference]) -> Tuple[str | None, Dict[str, int]]:
     locations = [p.preferred_location for p in preferences if p.preferred_location]
+
     if not locations:
-        return None
-    return Counter(locations).most_common(1)[0][0]
+        return None, {}
 
-ACTIVITY_COST = {
-    "beaches": 1,
-    "trekking": 1,
-    "cafes": 1,
-    "sightseeing": 1,
-    "water_park": 3,
-    "amusement_park": 3,
-    "theme_park": 3
-}
+    counter = Counter(locations)
+    max_votes = max(counter.values())
 
-def resolve_activities(preferences):
-    counts = Counter()
+    winners = [loc for loc, c in counter.items() if c == max_votes]
+
+    # Deterministic tie-break: alphabetical
+    final_location = sorted(winners)[0]
+
+    return final_location, dict(counter)
+
+
+# -----------------------------
+# Activity Resolution (Majority → fallback → deterministic)
+# -----------------------------
+def resolve_activities(
+    preferences: List[UserPreference],
+) -> Tuple[List[ActivityPreference], Dict[str, int]]:
+    counter = Counter()
+    user_count = len(preferences)
+
+    for p in preferences:
+        for a in p.activities:
+            counter[a.name] += 1
+
+    if not counter:
+        return [], {}
+
+    majority = math.ceil(user_count / 2)
+
+    # Step 1: strict majority
+    winners = [a for a, c in counter.items() if c >= majority]
+
+    # Step 2: fallback to highest votes
+    if not winners:
+        max_votes = max(counter.values())
+        winners = [a for a, c in counter.items() if c == max_votes]
+
+    # Step 3: deterministic tie-break
+    winners = sorted(winners)
+
+    activities = [
+        ActivityPreference(name=w, specific_place=None)
+        for w in winners
+    ]
+
+    return activities, dict(counter)
+
+
+# -----------------------------
+# Excluded Preferences (Structured)
+# -----------------------------
+def compute_excluded_preferences(
+    preferences: List[UserPreference],
+    final_activities: List[ActivityPreference],
+) -> Dict[str, List[str]]:
+    final_set = {a.name for a in final_activities}
+    excluded: Dict[str, List[str]] = {}
 
     for p in preferences:
         for act in p.activities:
-            counts[act.name] += 1
+            if act.name not in final_set:
+                excluded.setdefault(act.name, []).append(p.user_id)
 
-    if not counts:
-        return []
-
-    # Find max vote count
-    max_votes = max(counts.values())
-
-    # All activities that have the max votes
-    tied = [name for name, c in counts.items() if c == max_votes]
-
-    # If only one winner, use it
-    if len(tied) == 1:
-        return [ActivityPreference(name=tied[0], specific_place=None)]
-
-    else:
-
-        # Tie → break using cost
-        cheapest = min(
-            tied,
-            key=lambda x: ACTIVITY_COST.get(x, 2)
-        )
-
-        return [ActivityPreference(name=cheapest, specific_place=None)]
+    return excluded
 
 
+# -----------------------------
+# Group Resolution (Main Entry)
+# -----------------------------
 def resolve_group(preferences: List[UserPreference]) -> ResolvedGroupPreference:
     final_budget = resolve_budget(preferences)
-    final_location = resolve_location(preferences)
-    final_activities = resolve_activities(preferences)
 
-    excluded = []
-    for p in preferences:
-        for act in p.activities:
-            if act.name not in [a.name for a in final_activities]:
-                excluded.append(f"{p.user_id} wanted {act.name}")
+    final_location, location_votes = resolve_location(preferences)
 
-    reasoning = "Decisions were made using majority voting for activities and intersection of budget ranges."
+    final_activities, activity_votes = resolve_activities(preferences)
+
+    excluded_preferences = compute_excluded_preferences(
+        preferences, final_activities
+    )
+
+    reasoning = {
+        "budget": "Resolved using intersection of all user budget ranges.",
+        "location": "Resolved using majority voting with deterministic tie-break.",
+        "activities": "Resolved using majority voting with deterministic fallback.",
+    }
 
     return ResolvedGroupPreference(
         final_location=final_location,
@@ -90,16 +137,10 @@ def resolve_group(preferences: List[UserPreference]) -> ResolvedGroupPreference:
         destination_type=None,
         travel_style=None,
         activities=final_activities,
-        excluded_preferences=excluded,
-        reasoning=reasoning
+        excluded_preferences=excluded_preferences,
+        reasoning=reasoning,
+        votes={
+            "location": location_votes,
+            "activities": activity_votes,
+        },
     )
-
-
-
-
-
-
-
-
-
-

@@ -1,10 +1,10 @@
 from pydantic import BaseModel
 from typing import List, Optional
+from schemas.preferences import BudgetRange, ActivityPreference
 
 class PreferenceInput(BaseModel):
-    budget_min: int
-    budget_max: int
-    location: Optional[str]
-    destination_type: Optional[str]
-    activities: List[str]
-    dates: Optional[str]
+    budget: Optional[BudgetRange] = None
+    preferred_location: Optional[str] = None
+    destination_type: Optional[str] = None
+    activities: List[ActivityPreference] = []
+    dates: Optional[str] = None

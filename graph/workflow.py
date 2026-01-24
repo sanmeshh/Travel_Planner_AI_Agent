@@ -1,23 +1,29 @@
-from langgraph.graph import StateGraph, END
+from langgraph.graph import StateGraph
 from graph.state import TripState
-from graph.nodes import collect_node, resolve_node
+from agents.conflict_resolver import resolve_group
+from schemas.preferences import UserPreference
 
-graph = StateGraph(TripState)
+def resolve(state: TripState):
+    # reconstruct Pydantic models ONLY here
+    prefs = [
+        UserPreference(**p)
+        for p in state.preferences.values()
+    ]
 
-graph.add_node("collect", collect_node)
-graph.add_node("resolve", resolve_node)
+    result = resolve_group(prefs)
 
-graph.set_entry_point("collect")
+    # store as dict ONLY
+    state.resolved = result.model_dump()
 
-def router(state):
-    # If everyone is ready, finalize
-    if len(state.ready_users) == len(state.users):
-        return "resolve"
-    # Otherwise just collect this message and stop
-    return END
+    return state.model_dump()
 
-graph.add_conditional_edges("collect", router)
-graph.add_edge("resolve", END)
+builder = StateGraph(TripState)
 
+# ✅ use YOUR resolve function
+builder.add_node("resolve", resolve)
 
-app = graph.compile()
+builder.set_entry_point("resolve")
+builder.set_finish_point("resolve")
+
+app = builder.compile()
+
