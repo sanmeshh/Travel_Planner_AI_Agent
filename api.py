@@ -4,10 +4,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from schemas.input import PreferenceInput
 from schemas.preferences import UserPreference
 from schemas.group_preferences import ResolvedGroupPreference
+
 from graph.state import TripState
 from graph.workflow import app as agent
 
 app = FastAPI()
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -15,22 +17,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-sessions = {}
+# In-memory session store
+sessions: dict[str, TripState] = {}
+
+# -----------------------------
+# Create / Get Session (implicit)
+# -----------------------------
+def get_session(session_id: str) -> TripState:
+    if session_id not in sessions:
+        sessions[session_id] = TripState()
+    return sessions[session_id]
+
 
 # -----------------------------
 # Submit Preferences
 # -----------------------------
 @app.post("/submit_preferences")
-def submit(session_id: str, user_id: str, data: PreferenceInput):
-    if session_id not in sessions:
-        sessions[session_id] = TripState(expected_users=2)
+def submit_preferences(session_id: str, user_id: str, data: PreferenceInput):
+    state = get_session(session_id)
 
-    state = sessions[session_id]
+    #  No new users after lock
+    if state.expected_users is not None and user_id not in state.users:
+        return {
+            "status": "error",
+            "message": "Group is locked. No new users allowed."
+        }
 
     if user_id not in state.users:
         state.users.append(user_id)
 
-    # 🔥 BUILD Pydantic model, THEN dump to dict
+    # Build domain model
     pref = UserPreference(
         user_id=user_id,
         budget=data.budget,
@@ -41,47 +57,74 @@ def submit(session_id: str, user_id: str, data: PreferenceInput):
         dates=data.dates,
     )
 
-    # 🔥 store RAW DICT ONLY
+    #  Store RAW DICT only
     state.preferences[user_id] = pref.model_dump()
 
     return {"status": "saved"}
 
-@app.post("/create_session")
-def create_session(session_id: str, expected_users: int):
-    sessions[session_id] = TripState(
-        expected_users=expected_users
-    )
-    return {"status": "created"}
 
+# -----------------------------
+# Lock Group (Finalize Group Size)
+# -----------------------------
+@app.post("/lock_group")
+def lock_group(session_id: str):
+    if session_id not in sessions:
+        return {"status": "error", "message": "Session not found"}
+
+    state = sessions[session_id]
+
+    if state.expected_users is not None:
+        return {"status": "already_locked"}
+
+    state.expected_users = len(state.users)
+
+    return {
+        "status": "locked",
+        "expected_users": state.expected_users
+    }
 
 
 # -----------------------------
 # Mark Ready / Resolve
 # -----------------------------
 @app.post("/ready")
-def ready(session_id: str, user_id: str):
+def mark_ready(session_id: str, user_id: str):
     if session_id not in sessions:
-        return {"status": "error", "message": "No preferences submitted yet"}
+        return {"status": "error", "message": "Session not found"}
 
     state = sessions[session_id]
 
-   
+    if user_id not in state.users:
+        return {
+            "status": "error",
+            "message": "User has not submitted preferences"
+        }
+
     if user_id not in state.ready_users:
         state.ready_users.append(user_id)
 
-    # Resolve only when everyone is ready
-    if (
-    state.expected_users is not None
-    and len(state.users) == state.expected_users
-    and set(state.ready_users) == set(state.users)
-):
-        raw = agent.invoke(state.model_dump())
+    print(
+        f"[SESSION {session_id}] "
+        f"users={state.users}, "
+        f"ready={state.ready_users}, "
+        f"expected={state.expected_users}"
+    )
 
-        # rebuild TripState ONCE
+    # ✅ Resolve exactly once, only when:
+    # - group is locked
+    # - all users are present
+    # - all users are ready
+    # - not already resolved
+    if (
+        state.expected_users is not None
+        and len(state.users) == state.expected_users
+        and set(state.ready_users) == set(state.users)
+        and state.resolved is None
+    ):
+        raw = agent.invoke(state.model_dump())
         state = TripState(**raw)
         sessions[session_id] = state
 
-        # 🔥 rebuild Pydantic ONLY at response boundary
         final = ResolvedGroupPreference(**state.resolved)
         return {"status": "final", "result": final}
 
@@ -89,6 +132,7 @@ def ready(session_id: str, user_id: str):
         "status": "waiting",
         "ready": state.ready_users,
         "users": state.users,
+        "expected_users": state.expected_users,
     }
 
 

@@ -43,6 +43,9 @@ export default function App() {
     setForm({ ...form, [e.target.name]: e.target.value });
   };
 
+  // -----------------------------
+  // Submit Preferences
+  // -----------------------------
   const submit = async () => {
     await axios.post(
       "http://127.0.0.1:8000/submit_preferences",
@@ -64,6 +67,30 @@ export default function App() {
     setStatus("✅ Preferences saved");
   };
 
+  // -----------------------------
+  // Lock Group
+  // -----------------------------
+  const lockGroup = async () => {
+    try {
+      const res = await axios.post(
+        "http://127.0.0.1:8000/lock_group",
+        null,
+        { params: { session_id: sessionId } }
+      );
+
+      if (res.data.status === "locked") {
+        setStatus(`🔒 Group locked (${res.data.expected_users} users)`);
+      } else if (res.data.status === "already_locked") {
+        setStatus("🔒 Group already locked");
+      }
+    } catch {
+      setStatus("❌ Failed to lock group");
+    }
+  };
+
+  // -----------------------------
+  // Mark Ready
+  // -----------------------------
   const ready = async () => {
     const res = await axios.post(
       "http://127.0.0.1:8000/ready",
@@ -88,20 +115,8 @@ export default function App() {
         overflowX: "hidden"
       }}
     >
-      <div
-        style={{
-          maxWidth: 720,
-          margin: "0 auto",
-          padding: 30
-        }}
-      >
-        <h1
-          style={{
-            textAlign: "center",
-            marginBottom: 30,
-            color: "blue"
-          }}
-        >
+      <div style={{ maxWidth: 720, margin: "0 auto", padding: 30 }}>
+        <h1 style={{ textAlign: "center", marginBottom: 30, color: "blue" }}>
           🧠 Agentic Group Travel Planner
         </h1>
 
@@ -146,23 +161,31 @@ export default function App() {
             <input
               style={inputStyle}
               name="preferred_location"
-              placeholder="Preferred Location (e.g. Goa)"
+              placeholder="Preferred Location (eg. Imagica,Goa beaches,Lonavla villas)"
               onChange={update}
             />
             <input
               style={inputStyle}
               name="activities"
-              placeholder="Activities (comma separated)"
+              placeholder="Activities,comma separated (eg. Swimming,Relaxing,Trekking)"
               onChange={update}
             />
           </div>
 
+          {/* ACTION BUTTONS */}
           <div style={{ marginTop: 16, display: "flex", gap: 10 }}>
             <button
               style={{ ...buttonStyle, background: "#2563eb", color: "white" }}
               onClick={submit}
             >
               Save Preferences
+            </button>
+
+            <button
+              style={{ ...buttonStyle, background: "#7c3aed", color: "white" }}
+              onClick={lockGroup}
+            >
+              Lock Group
             </button>
 
             <button
@@ -185,16 +208,16 @@ export default function App() {
           <div style={{ ...cardStyle, border: "2px solid #16a34a" }}>
             <h3>🏆 Final Group Decision</h3>
             <pre
-  style={{
-    background: "#0f172a",   // dark slate
-    color: "#e5e7eb",        // light text
-    padding: 15,
-    borderRadius: 8,
-    fontSize: 13,
-    overflowX: "auto",
-    maxHeight: 400
-  }}
->
+              style={{
+                background: "#0f172a",
+                color: "#e5e7eb",
+                padding: 15,
+                borderRadius: 8,
+                fontSize: 13,
+                overflowX: "auto",
+                maxHeight: 400
+              }}
+            >
               {JSON.stringify(final, null, 2)}
             </pre>
           </div>
