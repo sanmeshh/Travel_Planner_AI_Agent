@@ -17,26 +17,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory session store
+#init the sessions
 sessions: dict[str, TripState] = {}
 
-# -----------------------------
-# Create / Get Session (implicit)
-# -----------------------------
+#create session
 def get_session(session_id: str) -> TripState:
     if session_id not in sessions:
         sessions[session_id] = TripState()
     return sessions[session_id]
 
 
-# -----------------------------
-# Submit Preferences
-# -----------------------------
+#submit the preferences
 @app.post("/submit_preferences")
 def submit_preferences(session_id: str, user_id: str, data: PreferenceInput):
     state = get_session(session_id)
 
-    #  No new users after lock
+    #wont accept new users after lock
     if state.expected_users is not None and user_id not in state.users:
         return {
             "status": "error",
@@ -46,7 +42,7 @@ def submit_preferences(session_id: str, user_id: str, data: PreferenceInput):
     if user_id not in state.users:
         state.users.append(user_id)
 
-    # Build domain model
+   
     pref = UserPreference(
         user_id=user_id,
         budget=data.budget,
@@ -57,15 +53,14 @@ def submit_preferences(session_id: str, user_id: str, data: PreferenceInput):
         dates=data.dates,
     )
 
-    #  Store RAW DICT only
+    #storinf raw dict
     state.preferences[user_id] = pref.model_dump()
 
     return {"status": "saved"}
 
 
-# -----------------------------
-# Lock Group (Finalize Group Size)
-# -----------------------------
+
+#lock group 
 @app.post("/lock_group")
 def lock_group(session_id: str):
     if session_id not in sessions:
@@ -84,9 +79,8 @@ def lock_group(session_id: str):
     }
 
 
-# -----------------------------
-# Mark Ready / Resolve
-# -----------------------------
+
+#Mark ready and resolve
 @app.post("/ready")
 def mark_ready(session_id: str, user_id: str):
     if session_id not in sessions:
@@ -110,11 +104,7 @@ def mark_ready(session_id: str, user_id: str):
         f"expected={state.expected_users}"
     )
 
-    # ✅ Resolve exactly once, only when:
-    # - group is locked
-    # - all users are present
-    # - all users are ready
-    # - not already resolved
+    #Resolve when,group is locked,users are ready and not already resolved
     if (
         state.expected_users is not None
         and len(state.users) == state.expected_users
