@@ -4,9 +4,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from schemas.input import PreferenceInput
 from schemas.preferences import UserPreference
 from schemas.group_preferences import ResolvedGroupPreference
+from schemas.explanation import DecisionExplanation
 
+from agents.explanation_agent import generate_explanation
 from graph.state import TripState
 from graph.workflow import app as agent
+
+
 
 app = FastAPI()
 
@@ -17,22 +21,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-#init the sessions
+#id and tripstate object
 sessions: dict[str, TripState] = {}
 
-#create session
+
+#creates a trip with a session id or you can say trip id
 def get_session(session_id: str) -> TripState:
     if session_id not in sessions:
         sessions[session_id] = TripState()
     return sessions[session_id]
 
 
-#submit the preferences
+
 @app.post("/submit_preferences")
 def submit_preferences(session_id: str, user_id: str, data: PreferenceInput):
     state = get_session(session_id)
 
-    #wont accept new users after lock
+
+    
     if state.expected_users is not None and user_id not in state.users:
         return {
             "status": "error",
@@ -42,25 +48,25 @@ def submit_preferences(session_id: str, user_id: str, data: PreferenceInput):
     if user_id not in state.users:
         state.users.append(user_id)
 
-   
+    # Convert input -> model
     pref = UserPreference(
         user_id=user_id,
         budget=data.budget,
         preferred_location=data.preferred_location,
-        destination_type=data.destination_type,
-        travel_style=None,
+        trip_type=data.trip_type,
         activities=data.activities,
-        dates=data.dates,
+        startdate=data.startdate,
+        enddate=data.enddate
     )
 
-    #storinf raw dict
+    #Store RAW dict only
     state.preferences[user_id] = pref.model_dump()
 
     return {"status": "saved"}
 
 
 
-#lock group 
+# Lock Group (Finalize users)
 @app.post("/lock_group")
 def lock_group(session_id: str):
     if session_id not in sessions:
@@ -71,6 +77,12 @@ def lock_group(session_id: str):
     if state.expected_users is not None:
         return {"status": "already_locked"}
 
+    if not state.users:
+        return {
+            "status": "error",
+            "message": "Cannot lock group with zero users"
+        }
+
     state.expected_users = len(state.users)
 
     return {
@@ -78,9 +90,7 @@ def lock_group(session_id: str):
         "expected_users": state.expected_users
     }
 
-
-
-#Mark ready and resolve
+#Mark Ready and Resolve
 @app.post("/ready")
 def mark_ready(session_id: str, user_id: str):
     if session_id not in sessions:
@@ -104,19 +114,35 @@ def mark_ready(session_id: str, user_id: str):
         f"expected={state.expected_users}"
     )
 
-    #Resolve when,group is locked,users are ready and not already resolved
+    #Resolve exactly once
     if (
         state.expected_users is not None
         and len(state.users) == state.expected_users
         and set(state.ready_users) == set(state.users)
         and state.resolved is None
     ):
+        # Langgraph resolution
         raw = agent.invoke(state.model_dump())
         state = TripState(**raw)
         sessions[session_id] = state
 
-        final = ResolvedGroupPreference(**state.resolved)
-        return {"status": "final", "result": final}
+        #decision model 
+        final_decision = ResolvedGroupPreference(**state.resolved)
+
+        #Generate explanation (read-only)
+        explanation = generate_explanation(
+            resolved_decision=state.resolved,
+            votes=state.resolved.get("votes", {}),
+            excluded_preferences=state.resolved.get(
+                "excluded_preferences", {}
+            ),
+        )
+
+        return {
+            "status": "final",
+            "result": final_decision,
+            "explanation": explanation,
+        }
 
     return {
         "status": "waiting",
@@ -126,6 +152,8 @@ def mark_ready(session_id: str, user_id: str):
     }
 
 
+
+# Debug
 @app.get("/sessions")
 def debug_sessions():
     return sessions

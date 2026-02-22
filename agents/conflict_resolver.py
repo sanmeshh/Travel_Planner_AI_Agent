@@ -1,13 +1,11 @@
 from typing import List, Dict, Tuple
 from collections import Counter
 import math
-
 from schemas.preferences import (
     UserPreference,
-    BudgetRange,
-    ActivityPreference,
-)
+    BudgetRange)
 from schemas.group_preferences import ResolvedGroupPreference
+from datetime import date,timedelta
 
 
 # -----------------------------
@@ -39,9 +37,9 @@ def resolve_budget(preferences: List[UserPreference]) -> BudgetRange:
 # -----------------------------
 # Location Resolution (Voting + deterministic tie-break)
 # -----------------------------
-def resolve_location(preferences: List[UserPreference]) -> Tuple[str | None, Dict[str, int]]:
-    locations = [p.preferred_location for p in preferences if p.preferred_location]
-
+def resolve_location(preferences: List[UserPreference]) :
+    locations = [p.preferred_location.lower() for p in preferences if p.preferred_location]
+    
     if not locations:
         return None, {}
 
@@ -55,19 +53,25 @@ def resolve_location(preferences: List[UserPreference]) -> Tuple[str | None, Dic
 
     return final_location, dict(counter)
 
+def resolve_trip(preferences:List[UserPreference]):
+    types = [p.trip_type.lower() for p in preferences if p.trip_type]
+    if not types:
+        return "Not Specified"
+    
 
-# -----------------------------
-# Activity Resolution (Majority → fallback → deterministic)
-# -----------------------------
-def resolve_activities(
-    preferences: List[UserPreference],
-) -> Tuple[List[ActivityPreference], Dict[str, int]]:
+    counter = Counter(types)
+    return counter.most_common(1)[0][0]
+
+
+
+# Activity Resolution 
+def resolve_activities(preferences: List[UserPreference],) -> Tuple[List[str], Dict[str, int]]:
     counter = Counter()
     user_count = len(preferences)
 
     for p in preferences:
         for a in p.activities:
-            counter[a.name] += 1
+            counter[a.lower()] += 1
 
     if not counter:
         return [], {}
@@ -84,13 +88,11 @@ def resolve_activities(
 
     # Step 3: deterministic tie-break
     winners = sorted(winners)
+    print(winners)
 
-    activities = [
-        ActivityPreference(name=w, specific_place=None)
-        for w in winners
-    ]
+   
 
-    return activities, dict(counter)
+    return winners, dict(counter)
 
 
 # -----------------------------
@@ -98,28 +100,48 @@ def resolve_activities(
 # -----------------------------
 def compute_excluded_preferences(
     preferences: List[UserPreference],
-    final_activities: List[ActivityPreference],
+    final_activities: List[str],
 ) -> Dict[str, List[str]]:
-    final_set = {a.name for a in final_activities}
+    final_set = {a for a in final_activities}
     excluded: Dict[str, List[str]] = {}
 
     for p in preferences:
         for act in p.activities:
-            if act.name not in final_set:
-                excluded.setdefault(act.name, []).append(p.user_id)
+            if act not in final_set:
+                excluded.setdefault(act, []).append(p.user_id)
 
     return excluded
 
+def resolve_dates(preferences: List[UserPreference]):
+    
+    starts = [p.start_date for p in preferences if p.startdate]
+    ends = [p.end_date for p in preferences if p.enddate]
 
-# -----------------------------
-# Group Resolution (Main Entry)
-# -----------------------------
+    if not starts or not ends:
+        return date.today(), date.today() + timedelta(days=1), 2
+
+    final_start = max(starts)
+    final_end = min(ends)
+
+    # If there is NO overlap (the smallest range is negative)
+    if final_start > final_end:
+        # Fallback: Pick the range with the most common start date
+        final_start = starts[0] 
+        final_end = ends[0]
+        # You should also add a note to 'reasoning' here!
+    
+    duration = (final_end - final_start).days + 1
+    return final_start, final_end, duration
+
 def resolve_group(preferences: List[UserPreference]) -> ResolvedGroupPreference:
     final_budget = resolve_budget(preferences)
-
     final_location, location_votes = resolve_location(preferences)
-
     final_activities, activity_votes = resolve_activities(preferences)
+    
+    #Actually resolve the trip type
+    final_trip_type = resolve_trip(preferences)
+
+    start,end,duration=resolve_dates(preferences)
 
     excluded_preferences = compute_excluded_preferences(
         preferences, final_activities
@@ -129,18 +151,21 @@ def resolve_group(preferences: List[UserPreference]) -> ResolvedGroupPreference:
         "budget": "Resolved using intersection of all user budget ranges.",
         "location": "Resolved using majority voting with deterministic tie-break.",
         "activities": "Resolved using majority voting with deterministic fallback.",
+        "trip_type": f"Decided on {final_trip_type} based on most frequent user input."
     }
 
     return ResolvedGroupPreference(
         final_location=final_location,
-        final_budget=final_budget,
-        destination_type=None,
-        travel_style=None,
+        final_budget=final_budget.model_dump(), 
+        trip_type=final_trip_type,        
         activities=final_activities,
+        final_start_date=start,
+        final_end_date=end,
+        total_days=duration,
         excluded_preferences=excluded_preferences,
         reasoning=reasoning,
         votes={
             "location": location_votes,
             "activities": activity_votes,
-        },
+        }
     )

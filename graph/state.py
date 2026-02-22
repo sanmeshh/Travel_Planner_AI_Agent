@@ -6,5 +6,6 @@ class TripState(BaseModel):
     preferences: Dict[str, dict] = Field(default_factory=dict)
     ready_users: List[str] = Field(default_factory=list)
 
-    expected_users: Optional[int] = None   # 👈 NEW
+    expected_users: Optional[int] = None  
     resolved: Optional[dict] = None
+    itinerary:Optional[List[dict]]=None
